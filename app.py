@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
+import holidays
 
 # ==============================================================================
 # CONFIGURAÇÃO INICIAL DA PÁGINA
@@ -8,9 +9,28 @@ from datetime import date, timedelta
 st.set_page_config(page_title="Análise de Lançamento e Rolagem de Opções", layout="wide")
 
 st.title("📊 Análise de Lançamento e Rolagem de Opções de Compra (Calls)")
-st.caption("Framework Integrado: Natenberg, Sinclair, Taleb & Rule of Thumb do Mercado")
+st.caption("Framework Integrado: Natenberg, Sinclair, Taleb & Rule of Thumb do Mercado (Ajustado por Dias Úteis/Feriados BR)")
 
 st.divider()
+
+# Instância dos feriados nacionais brasileiros
+feriados_br = holidays.BR()
+
+def calcular_dias_uteis_br(data_inicio, data_fim):
+    """Calcula a quantidade de dias úteis no Brasil (exclui finais de semana e feriados nacionais)"""
+    if data_fim <= data_inicio:
+        return 0
+    
+    dias_uteis = 0
+    data_atual = data_inicio + timedelta(days=1)
+    
+    while data_atual <= data_fim:
+        # 5 = Sábado, 6 = Domingo
+        if data_atual.weekday() < 5 and data_atual not in feriados_br:
+            dias_uteis += 1
+        data_atual += timedelta(days=1)
+        
+    return dias_uteis
 
 # ==============================================================================
 # 1. DADOS DE ENTRADA: ATIVO SUBJACENTE (AÇÃO) E REGIME DE VOLATILIDADE
@@ -64,7 +84,9 @@ def capturar_entradas_opcoes_call(prefixo, quantidade):
             theta_pct = st.number_input(f"Theta (%) [Diário]", value=-0.125 - (i*0.02), step=0.005, format="%.3f", key=f"{prefixo}_t_{i}")
             vega = st.number_input(f"Vega (ν)", value=0.0420 + (i*0.005), step=0.0050, format="%.4f", key=f"{prefixo}_v_{i}")
             
-            dte = (vencimento - date.today()).days
+            # Cálculo dos dias corridos e dias úteis
+            dte_corridos = (vencimento - date.today()).days
+            dte_uteis = calcular_dias_uteis_br(date.today(), vencimento)
             
             opcoes.append({
                 'ticker': ticker_op,
@@ -72,7 +94,8 @@ def capturar_entradas_opcoes_call(prefixo, quantidade):
                 'strike': strike_op,
                 'preco_teorico': preco_teorico,
                 'vencimento': vencimento,
-                'dte': dte,
+                'dte_corridos': dte_corridos,
+                'dte_uteis': dte_uteis,
                 'delta': delta,
                 'gamma': gamma,
                 'theta_pct': theta_pct,
@@ -136,7 +159,7 @@ if st.button("📊 Executar Análise Integrada (Natenberg, Sinclair, Taleb & Mer
             "Preço Teórico": f"R$ {op['preco_teorico']:.2f}",
             "Dif. vs Teórico": f"R$ {diff_teorico:+.2f}",
             "Vencimento": op['vencimento'].strftime('%d/%m/%Y'),
-            "DTE": f"{op['dte']}d",
+            "DTE (Úteis / Corridos)": f"{op['dte_uteis']} d.u. ({op['dte_corridos']} d.c.)",
             "Delta (Δ)": f"{op['delta']:.4f}",
             "Gamma (γ)": f"{op['gamma']:.4f}",
             "Theta (%)": f"{op['theta_pct']:.3f}%",
@@ -181,7 +204,7 @@ if st.button("📊 Executar Análise Integrada (Natenberg, Sinclair, Taleb & Mer
                 "Preço Teórico": f"R$ {op['preco_teorico']:.2f}",
                 "Dif. vs Teórico": f"R$ {diff_teorico:+.2f}",
                 "Vencimento": op['vencimento'].strftime('%d/%m/%Y'),
-                "DTE": f"{op['dte']}d",
+                "DTE (Úteis / Corridos)": f"{op['dte_uteis']} d.u. ({op['dte_corridos']} d.c.)",
                 "Delta (Δ)": f"{op['delta']:.4f}",
                 "Gamma (γ)": f"{op['gamma']:.4f}",
                 "Theta (%)": f"{op['theta_pct']:.3f}%",
@@ -219,7 +242,7 @@ if st.button("📊 Executar Análise Integrada (Natenberg, Sinclair, Taleb & Mer
         st.markdown("**Razões da Indicação (Lançamento):**")
         st.write(f"• **Sheldon Natenberg (Volatilidade & VRP):** O IV Rank da ação está em `{iv_rank:.2f}%` e o Variance Risk Premium (IV - HV) está positivo em `{vrp_geral:+.2f}%`. A opção selecionada permite vender volatilidade superavaliada com boa margem.")
         st.write(f"• **Euan Sinclair (Edge & Preço Teórico):** O preço de mercado de `R$ {melhor_lanc['preco']:.2f}` apresenta uma sobreprecificação de `R$ {melhor_lanc['preco'] - melhor_lanc['preco_teorico']:+.2f}` em relação ao Preço Teórico fornecido (`R$ {melhor_lanc['preco_teorico']:.2f}`), capturando a borda estatística de venda.")
-        st.write(f"• **Nassim Taleb (Curva e Controle de Gamma):** O Gamma está controlado em `{melhor_lanc['gamma']:.4f}`, minimizando a fragilidade do portfólio a choques severos do ativo no vencimento de `{melhor_lanc['dte']} dias`.")
+        st.write(f"• **Nassim Taleb (Curva e Controle de Gamma):** O Gamma está controlado em `{melhor_lanc['gamma']:.4f}`, minimizando a fragilidade do portfólio a choques severos do ativo no vencimento de `{melhor_lanc['dte_uteis']} dias úteis` ({melhor_lanc['dte_corridos']} dias corridos).")
         st.write(f"• **Rule of Thumb do Mercado:** Gera uma taxa de retorno direta de `{((melhor_lanc['preco']/preco_acao)*100):.2f}%` no período com um decaimento diário de Theta de `{melhor_lanc['theta_pct']:.3f}%`.")
         if flag_proventos and data_ex and (data_ex <= melhor_lanc['vencimento']):
             st.write(f"• **Impacto do Provento:** Considera captura do provento de `R$ {provento_liq:.2f}` no período antes do vencimento.")
@@ -231,9 +254,9 @@ if st.button("📊 Executar Análise Integrada (Natenberg, Sinclair, Taleb & Mer
             credito_rol = melhor_rol['preco'] - melhor_lanc['preco'] if melhor_lanc else 0.0
             st.markdown("**Razões da Indicação (Rolagem):**")
             st.write(f"• **Rule of Thumb do Mercado (Roll for Credit):** A rolagem para `{melhor_rol['ticker']}` gera um resultado líquido financeiro de `R$ {credito_rol:+.2f}`, respeitando a regra clássica de não rolar com débito.")
-            st.write(f"• **Nassim Taleb (Atenuação do Risco Gamma):** Ao estender o prazo para `{melhor_rol['dte']} dias`, o Gamma é ajustado para `{melhor_rol['gamma']:.4f}`, reduzindo drasticamente o risco de não-linearidade próximo do vencimento.")
+            st.write(f"• **Nassim Taleb (Atenuação do Risco Gamma):** Ao estender o prazo para `{melhor_rol['dte_uteis']} dias úteis` ({melhor_rol['dte_corridos']} dias corridos), o Gamma é ajustado para `{melhor_rol['gamma']:.4f}`, reduzindo drasticamente o risco de não-linearidade próximo do vencimento.")
             st.write(f"• **Euan Sinclair & Natenberg:** Permite continuar vendido na curva de volatilidade implícita (IV `{vol_implicita:.2f}%` vs HV `{vol_historica:.2f}%`), mantendo a captura do prêmio de volatilidade com um Preço Teórico de `R$ {melhor_rol['preco_teorico']:.2f}`.")
             st.write(f"• **Decaimento Temporal:** Mantém uma captura diária de Theta de `{melhor_rol['theta_pct']:.3f}%` sobre a nova estrutura.")
             if flag_proventos and data_ex and (data_ex <= melhor_rol['vencimento']):
                 st.write(f"• **Impacto do Provento:** Ajustado para captura do fluxo de caixa de `R$ {provento_liq:.2f}` até a data EX.")
-    
+        

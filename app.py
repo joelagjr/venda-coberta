@@ -83,18 +83,25 @@ def capturar_entradas_opcoes_call(prefixo, quantidade):
 # ==============================================================================
 # 2. ENTRADA DE OPÇÕES DE COMPRA PARA LANÇAMENTO INICIAL (ATÉ 3)
 # ==============================================================================
-st.subheader("🚀 2. Opções de Compra (Calls) para Lançamento Inicial")
+st.subheader("🚀 2. SIMULAÇÃO I: Opções de Compra (Calls) para Lançamento Inicial")
 qtd_lanc = st.radio("Quantidade de Opções a Avaliar para Lançamento Inicial:", [1, 2, 3], horizontal=True, key="qtd_lanc")
 opcoes_lancamento = capturar_entradas_opcoes_call("lanc", qtd_lanc)
 
 st.divider()
 
 # ==============================================================================
-# 3. ENTRADA DE OPÇÕES DE COMPRA PARA ROLAGEM (ATÉ 3)
+# 3. ENTRADA DE OPÇÕES DE COMPRA PARA ROLAGEM (ATÉ 3) - COM FLAG SIM/NÃO
 # ==============================================================================
-st.subheader("🔄 3. Opções de Compra (Calls) para Rolagem")
-qtd_rol = st.radio("Quantidade de Opções a Avaliar para Rolagem:", [1, 2, 3], horizontal=True, key="qtd_rol")
-opcoes_rolagem = capturar_entradas_opcoes_call("rol", qtd_rol)
+st.subheader("🔄 3. SIMULAÇÃO II: Opções de Compra (Calls) para Rolagem")
+
+executar_rolagem = st.radio("Incluir corrida de simulação para Rolagem da Opção?", ["Sim", "Não"], index=0, horizontal=True)
+
+opcoes_rolagem = []
+if executar_rolagem == "Sim":
+    qtd_rol = st.radio("Quantidade de Opções a Avaliar para Rolagem:", [1, 2, 3], horizontal=True, key="qtd_rol")
+    opcoes_rolagem = capturar_entradas_opcoes_call("rol", qtd_rol)
+else:
+    st.info("ℹ️ A simulação da rolagem está desativada. Apenas a análise do Lançamento Inicial será executada.")
 
 st.divider()
 
@@ -111,7 +118,7 @@ if st.button("📊 Executar Análise Integrada (Natenberg, Sinclair, Taleb & Mer
     # --------------------------------------------------------------------------
     # QUADRO COMPARATIVO - LANÇAMENTO INICIAL
     # --------------------------------------------------------------------------
-    st.markdown("### 📋 Tabela Comparativa: Lançamento Inicial")
+    st.markdown("### 📋 Simulação Separada: Lançamento Inicial")
     
     dados_tab_lanc = []
     for op in opcoes_lancamento:
@@ -147,54 +154,53 @@ if st.button("📊 Executar Análise Integrada (Natenberg, Sinclair, Taleb & Mer
     for op in opcoes_lancamento:
         ret_bruto = (op['preco'] / preco_acao) * 100.0
         diff_t = op['preco'] - op['preco_teorico']
-        # Score ponderado considerando VRP, DTE, Delta, Gamma e Preço Teórico
         score = (diff_t * 2.0) + (ret_bruto * 1.5) + (abs(op['theta_pct']) * 10.0) - (op['gamma'] * 15.0)
         if score > maior_score_lanc:
             maior_score_lanc = score
             melhor_lanc = op
 
     # --------------------------------------------------------------------------
-    # QUADRO COMPARATIVO - ROLAGEM
+    # QUADRO COMPARATIVO - ROLAGEM (EXIBIDO APENAS SE FLAG == "Sim")
     # --------------------------------------------------------------------------
-    st.markdown("### 📋 Tabela Comparativa: Rolagem")
-    
-    dados_tab_rol = []
-    for op in opcoes_rolagem:
-        diff_teorico = op['preco'] - op['preco_teorico']
-        credito_liquido = op['preco'] - melhor_lanc['preco'] if melhor_lanc else 0.0
-        
-        prov_afeta = flag_proventos and data_ex and (data_ex <= op['vencimento'])
-        desc_prov = f"R$ {provento_liq:.2f} (Ex: {data_ex.strftime('%d/%m/%Y')})" if prov_afeta else "Nenhum no período"
-        
-        dados_tab_rol.append({
-            "Ticker Opção": op['ticker'],
-            "Preço Mercado": f"R$ {op['preco']:.2f}",
-            "Strike (K)": f"R$ {op['strike']:.2f}",
-            "Preço Teórico": f"R$ {op['preco_teorico']:.2f}",
-            "Dif. vs Teórico": f"R$ {diff_teorico:+.2f}",
-            "Vencimento": op['vencimento'].strftime('%d/%m/%Y'),
-            "DTE": f"{op['dte']}d",
-            "Delta (Δ)": f"{op['delta']:.4f}",
-            "Gamma (γ)": f"{op['gamma']:.4f}",
-            "Theta (%)": f"{op['theta_pct']:.3f}%",
-            "Vega (ν)": f"{op['vega']:.4f}",
-            "Dif. Crédito/Débito": f"R$ {credito_liquido:+.2f}",
-            "Provento": desc_prov
-        })
-        
-    st.table(pd.DataFrame(dados_tab_rol))
-
-    # Algoritmo de Escolha da Melhor Opção para Rolagem
     melhor_rol = None
-    maior_score_rol = -999.0
-    
-    for op in opcoes_rolagem:
-        credito = op['preco'] - melhor_lanc['preco']
-        diff_t = op['preco'] - op['preco_teorico']
-        score = (credito * 3.0) + (diff_t * 2.0) - (op['gamma'] * 20.0) + (abs(op['theta_pct']) * 8.0)
-        if score > maior_score_rol:
-            maior_score_rol = score
-            melhor_rol = op
+    if executar_rolagem == "Sim" and opcoes_rolagem:
+        st.markdown("### 📋 Simulação Separada: Rolagem da Opção")
+        
+        dados_tab_rol = []
+        for op in opcoes_rolagem:
+            diff_teorico = op['preco'] - op['preco_teorico']
+            credito_liquido = op['preco'] - melhor_lanc['preco'] if melhor_lanc else 0.0
+            
+            prov_afeta = flag_proventos and data_ex and (data_ex <= op['vencimento'])
+            desc_prov = f"R$ {provento_liq:.2f} (Ex: {data_ex.strftime('%d/%m/%Y')})" if prov_afeta else "Nenhum no período"
+            
+            dados_tab_rol.append({
+                "Ticker Opção": op['ticker'],
+                "Preço Mercado": f"R$ {op['preco']:.2f}",
+                "Strike (K)": f"R$ {op['strike']:.2f}",
+                "Preço Teórico": f"R$ {op['preco_teorico']:.2f}",
+                "Dif. vs Teórico": f"R$ {diff_teorico:+.2f}",
+                "Vencimento": op['vencimento'].strftime('%d/%m/%Y'),
+                "DTE": f"{op['dte']}d",
+                "Delta (Δ)": f"{op['delta']:.4f}",
+                "Gamma (γ)": f"{op['gamma']:.4f}",
+                "Theta (%)": f"{op['theta_pct']:.3f}%",
+                "Vega (ν)": f"{op['vega']:.4f}",
+                "Dif. Crédito/Débito": f"R$ {credito_liquido:+.2f}",
+                "Provento": desc_prov
+            })
+            
+        st.table(pd.DataFrame(dados_tab_rol))
+
+        # Algoritmo de Escolha da Melhor Opção para Rolagem
+        maior_score_rol = -999.0
+        for op in opcoes_rolagem:
+            credito = op['preco'] - melhor_lanc['preco'] if melhor_lanc else op['preco']
+            diff_t = op['preco'] - op['preco_teorico']
+            score = (credito * 3.0) + (diff_t * 2.0) - (op['gamma'] * 20.0) + (abs(op['theta_pct']) * 8.0)
+            if score > maior_score_rol:
+                maior_score_rol = score
+                melhor_rol = op
 
     # --------------------------------------------------------------------------
     # DIAGNÓSTICO E PARECER TÉCNICO COMPLETO
@@ -202,7 +208,10 @@ if st.button("📊 Executar Análise Integrada (Natenberg, Sinclair, Taleb & Mer
     st.markdown("---")
     st.markdown("## 💡 Indicação e Justificativas Teóricas / Práticas")
     
-    col_ind1, col_ind2 = st.columns(2)
+    if executar_rolagem == "Sim":
+        col_ind1, col_ind2 = st.columns(2)
+    else:
+        col_ind1 = st.container()
     
     with col_ind1:
         st.success(f"🎯 **Indicação para Lançamento Inicial:** `{melhor_lanc['ticker']}` (Strike: R$ {melhor_lanc['strike']:.2f})")
@@ -215,15 +224,16 @@ if st.button("📊 Executar Análise Integrada (Natenberg, Sinclair, Taleb & Mer
         if flag_proventos and data_ex and (data_ex <= melhor_lanc['vencimento']):
             st.write(f"• **Impacto do Provento:** Considera captura do provento de `R$ {provento_liq:.2f}` no período antes do vencimento.")
 
-    with col_ind2:
-        st.info(f"🔄 **Indicação para Rolagem:** `{melhor_rol['ticker']}` (Strike: R$ {melhor_rol['strike']:.2f})")
-        
-        credito_rol = melhor_rol['preco'] - melhor_lanc['preco']
-        st.markdown("**Razões da Indicação (Rolagem):**")
-        st.write(f"• **Rule of Thumb do Mercado (Roll for Credit):** A rolagem para `{melhor_rol['ticker']}` gera um resultado líquido financeiro de `R$ {credito_rol:+.2f}`, respeitando a regra clássica de não rolar com débito.")
-        st.write(f"• **Nassim Taleb (Atenuação do Risco Gamma):** Ao estender o prazo para `{melhor_rol['dte']} dias`, o Gamma é ajustado para `{melhor_rol['gamma']:.4f}`, reduzindo drasticamente o risco de não-linearidade próximo do vencimento.")
-        st.write(f"• **Euan Sinclair & Natenberg:** Permite continuar vendido na curva de volatilidade implícita (IV `{vol_implicita:.2f}%` vs HV `{vol_historica:.2f}%`), mantendo a captura do prêmio de volatilidade com um Preço Teórico de `R$ {melhor_rol['preco_teorico']:.2f}`.")
-        st.write(f"• **Decaimento Temporal:** Mantém uma captura diária de Theta de `{melhor_rol['theta_pct']:.3f}%` sobre a nova estrutura.")
-        if flag_proventos and data_ex and (data_ex <= melhor_rol['vencimento']):
-            st.write(f"• **Impacto do Provento:** Ajustado para captura do fluxo de caixa de `R$ {provento_liq:.2f}` até a data EX.")
-        
+    if executar_rolagem == "Sim" and melhor_rol:
+        with col_ind2:
+            st.info(f"🔄 **Indicação para Rolagem:** `{melhor_rol['ticker']}` (Strike: R$ {melhor_rol['strike']:.2f})")
+            
+            credito_rol = melhor_rol['preco'] - melhor_lanc['preco'] if melhor_lanc else 0.0
+            st.markdown("**Razões da Indicação (Rolagem):**")
+            st.write(f"• **Rule of Thumb do Mercado (Roll for Credit):** A rolagem para `{melhor_rol['ticker']}` gera um resultado líquido financeiro de `R$ {credito_rol:+.2f}`, respeitando a regra clássica de não rolar com débito.")
+            st.write(f"• **Nassim Taleb (Atenuação do Risco Gamma):** Ao estender o prazo para `{melhor_rol['dte']} dias`, o Gamma é ajustado para `{melhor_rol['gamma']:.4f}`, reduzindo drasticamente o risco de não-linearidade próximo do vencimento.")
+            st.write(f"• **Euan Sinclair & Natenberg:** Permite continuar vendido na curva de volatilidade implícita (IV `{vol_implicita:.2f}%` vs HV `{vol_historica:.2f}%`), mantendo a captura do prêmio de volatilidade com um Preço Teórico de `R$ {melhor_rol['preco_teorico']:.2f}`.")
+            st.write(f"• **Decaimento Temporal:** Mantém uma captura diária de Theta de `{melhor_rol['theta_pct']:.3f}%` sobre a nova estrutura.")
+            if flag_proventos and data_ex and (data_ex <= melhor_rol['vencimento']):
+                st.write(f"• **Impacto do Provento:** Ajustado para captura do fluxo de caixa de `R$ {provento_liq:.2f}` até a data EX.")
+    

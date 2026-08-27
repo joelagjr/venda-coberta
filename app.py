@@ -1,241 +1,229 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
-from scipy.stats import norm
-from datetime import datetime, date
+from datetime import date, timedelta
 
 # ==============================================================================
-# 1. MOTOR DE CÁLCULO DE BLACK-SCHOLES-MERTON & GREGAS FORMATEDAS
+# CONFIGURAÇÃO INICIAL DA PÁGINA
 # ==============================================================================
+st.set_page_config(page_title="Análise de Lançamento e Rolagem de Opções", layout="wide")
 
-def calcular_bsm_e_gregas(S, K, dte, r, sigma, provento_liq=0.0):
-    """
-    Calcula o Preço Teórico e as Gregas para Opções de Compra (Calls) Europeias.
-    Ajusta o preço da ação pelo valor presente do provento no período (se houver).
-    """
-    T = max(dte, 1) / 365.0
-    
-    # Ajuste de Provento no Ativo Objeto (S_adj) para precificação de Call
-    S_adj = max(0.01, S - provento_liq * np.exp(-r * T))
-    
-    if T <= 0 or sigma <= 0:
-        intrinsic = max(0.0, S_adj - K)
-        return {
-            'preco_teorico': intrinsic,
-            'delta': 1.0 if S_adj > K else 0.0,
-            'gamma': 0.0,
-            'theta_pct': 0.0,
-            'vega': 0.0
-        }
-    
-    d1 = (np.log(S_adj / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    
-    # Preço Teórico Call BSM
-    preco_teorico = S_adj * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
-    
-    # Gregas
-    delta = norm.cdf(d1)
-    gamma = norm.pdf(d1) / (S_adj * sigma * np.sqrt(T))
-    
-    # Theta em R$/dia e conversão para Percentual ao dia (%) em relação ao preço do ativo
-    theta_diario_brl = (- (S_adj * sigma * norm.pdf(d1)) / (2 * np.sqrt(T)) - r * K * np.exp(-r * T) * norm.cdf(d2)) / 365.0
-    theta_pct_dia = (theta_diario_brl / S_adj) * 100.0  # Em %
-    
-    # Vega por 1% de alteração na volatilidade implícita
-    vega = (S_adj * norm.pdf(d1) * np.sqrt(T)) / 100.0
-    
-    return {
-        'preco_teorico': preco_teorico,
-        'delta': delta,
-        'gamma': gamma,
-        'theta_pct': theta_pct_dia,
-        'vega': vega
-    }
+st.title("📊 Análise de Lançamento e Rolagem de Opções de Compra (Calls)")
+st.caption("Framework Integrado: Natenberg, Sinclair, Taleb & Rule of Thumb do Mercado")
 
-def capturar_entradas_opcoes(prefixo, qtd, dte_default=30):
-    """Gera blocos dinâmicos para entrada de dados de até 3 opções (Lançamento ou Rolagem)."""
+st.divider()
+
+# ==============================================================================
+# 1. DADOS DE ENTRADA: ATIVO SUBJACENTE (AÇÃO) E REGIME DE VOLATILIDADE
+# ==============================================================================
+st.subheader("📌 1. Dados do Ativo Subjacente (Ação) & Volatilidade")
+
+col_ac1, col_ac2, col_ac3, col_ac4 = st.columns(4)
+with col_ac1:
+    ticker_acao = st.text_input("Ticker da Ação", value="PETR4").upper()
+    preco_acao = st.number_input("Preço da Ação (R$)", value=38.50, step=0.10, format="%.2f")
+
+with col_ac2:
+    vol_implicita = st.number_input("Volatilidade Implícita (IV %)", value=34.50, step=0.50, format="%.2f")
+    iv_rank = st.number_input("IV Rank Call (%)", value=68.00, step=1.00, format="%.2f")
+
+with col_ac3:
+    vol_historica = st.number_input("Volatilidade Histórica (HV %)", value=26.00, step=0.50, format="%.2f")
+    hv_rank = st.number_input("HV Rank (%)", value=42.00, step=1.00, format="%.2f")
+
+with col_ac4:
+    st.write("**Proventos no Período**")
+    flag_proventos = st.checkbox("Considerar Dividendos / JCP", value=True)
+    if flag_proventos:
+        provento_liq = st.number_input("Valor Líquido (R$)", value=0.85, step=0.05, format="%.2f")
+        data_ex = st.date_input("Data Ex-Provento", value=date.today() + timedelta(days=15))
+    else:
+        provento_liq = 0.0
+        data_ex = None
+
+st.divider()
+
+# ==============================================================================
+# FUNÇÃO AUXILIAR PARA CAPTURA DOS DADOS DAS OPÇÕES (LANÇAMENTO E ROLAGEM)
+# ==============================================================================
+def capturar_entradas_opcoes_call(prefixo, quantidade):
     opcoes = []
-    cols = st.columns(qtd)
+    cols = st.columns(quantidade)
     
-    for i in range(qtd):
+    for i in range(quantidade):
         with cols[i]:
             st.markdown(f"##### Opção Call #{i+1}")
-            ticker = st.text_input(f"Ticker/Código", value=f"CALL_{prefixo.upper()}_{i+1}", key=f"{prefixo}_tick_{i}")
-            strike = st.number_input(f"Strike (K)", value=30.0 + (i * 1.0), step=0.5, key=f"{prefixo}_strike_{i}")
-            preco_mkt = st.number_input(f"Preço Mercado (Prêmio)", value=1.20 - (i * 0.25), step=0.05, key=f"{prefixo}_mkt_{i}")
-            vencimento = st.date_input(f"Data de Vencimento", value=date.today() + pd.Timedelta(days=dte_default + (i*15)), key=f"{prefixo}_venc_{i}")
+            ticker_op = st.text_input(f"Ticker da Opção", value=f"{ticker_acao}_{prefixo.upper()}{i+1}", key=f"{prefixo}_tick_{i}").upper()
+            preco_op = st.number_input(f"Preço de Mercado (R$)", value=1.45 - (i * 0.30), step=0.05, format="%.2f", key=f"{prefixo}_p_{i}")
+            strike_op = st.number_input(f"Preço de Strike (R$)", value=preco_acao + (i * 1.50), step=0.50, format="%.2f", key=f"{prefixo}_k_{i}")
+            preco_teorico = st.number_input(f"Preço Teórico (R$)", value=1.38 - (i * 0.28), step=0.05, format="%.2f", key=f"{prefixo}_pt_{i}")
+            vencimento = st.date_input(f"Data de Vencimento", value=date.today() + timedelta(days=30 + (i*15)), key=f"{prefixo}_venc_{i}")
             
-            # Volatilidades para cada opção
-            st.caption("Volatilidades & Ranks")
-            iv = st.number_input(f"Vol Implícita (IV %)", value=35.0, step=0.5, key=f"{prefixo}_iv_{i}") / 100.0
-            iv_rank = st.number_input(f"IV Rank (%)", value=60.0 + (i*5), step=1.0, key=f"{prefixo}_iv_rank_{i}")
-            hv = st.number_input(f"Vol Histórica (HV %)", value=25.0, step=0.5, key=f"{prefixo}_hv_{i}") / 100.0
-            hv_rank = st.number_input(f"HV Rank (%)", value=45.0, step=1.0, key=f"{prefixo}_hv_rank_{i}")
+            st.caption("Gregas da Opção")
+            delta = st.number_input(f"Delta (Δ)", value=0.4500 - (i*0.10), step=0.0100, format="%.4f", key=f"{prefixo}_d_{i}")
+            gamma = st.number_input(f"Gamma (γ)", value=0.0850 - (i*0.01), step=0.0050, format="%.4f", key=f"{prefixo}_g_{i}")
+            theta_pct = st.number_input(f"Theta (%) [Diário]", value=-0.125 - (i*0.02), step=0.005, format="%.3f", key=f"{prefixo}_t_{i}")
+            vega = st.number_input(f"Vega (ν)", value=0.0420 + (i*0.005), step=0.0050, format="%.4f", key=f"{prefixo}_v_{i}")
             
             dte = (vencimento - date.today()).days
             
             opcoes.append({
-                'ticker': ticker, 'strike': strike, 'preco_mkt': preco_mkt,
-                'vencimento': vencimento, 'dte': dte, 'iv': iv, 'iv_rank': iv_rank,
-                'hv': hv, 'hv_rank': hv_rank
+                'ticker': ticker_op,
+                'preco': preco_op,
+                'strike': strike_op,
+                'preco_teorico': preco_teorico,
+                'vencimento': vencimento,
+                'dte': dte,
+                'delta': delta,
+                'gamma': gamma,
+                'theta_pct': theta_pct,
+                'vega': vega
             })
     return opcoes
 
 # ==============================================================================
-# 2. PAINEL PRINCIPAL & INPUTS DO ATIVO SUBJACENTE E PROVENTOS
+# 2. ENTRADA DE OPÇÕES DE COMPRA PARA LANÇAMENTO INICIAL (ATÉ 3)
 # ==============================================================================
-
-st.set_page_config(page_title="Análise Avançada: Lançamento e Rolagem de Opções", layout="wide")
-st.title("📈 Análise de Lançamento e Rolagem de Opções (Até 3 Calls)")
-st.caption("Integração: Natenberg, Sinclair, Taleb & Rule of Thumb do Mercado")
-
-st.sidebar.header("⚙️ Ativo Subjacente & Macro")
-S = st.sidebar.number_input("Preço da Ação (S)", value=30.00, step=0.50, format="%.2f")
-r = st.sidebar.number_input("Taxa Livre de Risco / SELIC (%)", value=10.5, step=0.25) / 100.0
-
-st.sidebar.subheader("💰 Dividendos / JCP no Período")
-flag_proventos = st.sidebar.checkbox("Considerar Proventos no Período", value=True)
-
-if flag_proventos:
-    provento_liq = st.sidebar.number_input("Valor Líquido do Provento (R$)", value=0.50, step=0.10)
-    data_ex = st.sidebar.date_input("Data Ex-Provento", value=date.today() + pd.Timedelta(days=15))
-else:
-    provento_liq = 0.0
-    data_ex = None
+st.subheader("🚀 2. Opções de Compra (Calls) para Lançamento Inicial")
+qtd_lanc = st.radio("Quantidade de Opções a Avaliar para Lançamento Inicial:", [1, 2, 3], horizontal=True, key="qtd_lanc")
+opcoes_lancamento = capturar_entradas_opcoes_call("lanc", qtd_lanc)
 
 st.divider()
 
 # ==============================================================================
-# 3. MÓDULO I: OPÇÕES DE COMPRA A SEREM LANÇADAS (ATÉ 3)
+# 3. ENTRADA DE OPÇÕES DE COMPRA PARA ROLAGEM (ATÉ 3)
 # ==============================================================================
-
-st.subheader("1️⃣ Opções de Compra (Calls) para Lançamento Inicial")
-qtd_lanc = st.radio("Quantidade de opções a avaliar para Lançamento:", [1, 2, 3], horizontal=True, key="qtd_lanc")
-opcoes_lanc = capturar_entradas_opcoes("lanc", qtd_lanc, dte_default=30)
-
-# Processamento e Tabela comparativa dos Lançamentos
-dados_lanc_processados = []
-for op in opcoes_lanc:
-    # Verificação se a data EX ocorre antes do vencimento
-    prov_aplicado = provento_liq if (flag_proventos and data_ex and data_ex <= op['vencimento']) else 0.0
-    
-    g = calcular_bsm_e_gregas(S, op['strike'], op['dte'], r, op['iv'], prov_aplicado)
-    vrp = (op['iv'] - op['hv']) * 100.0
-    retorno_imediato = (op['preco_mkt'] / S) * 100.0
-    
-    dados_lanc_processados.append({
-        'Ticker': op['ticker'],
-        'Strike': f"R$ {op['strike']:.2f}",
-        'Preço Mercado': f"R$ {op['preco_mkt']:.2f}",
-        'Preço Teórico': f"R$ {g['preco_teorico']:.2f}",
-        'Vencimento': op['vencimento'].strftime('%d/%m/%Y'),
-        'DTE': op['dte'],
-        'IV %': f"{op['iv']*100:.2f}%",
-        'IV Rank': f"{op['iv_rank']:.1f}%",
-        'HV %': f"{op['hv']*100:.2f}%",
-        'HV Rank': f"{op['hv_rank']:.1f}%",
-        'VRP (IV-HV)': f"{vrp:+.2f}%",
-        'Delta (Δ)': f"{g['delta']:.4f}",
-        'Gamma (γ)': f"{g['gamma']:.4f}",
-        'Theta (%/dia)': f"{g['theta_pct']:.3f}%",
-        'Vega (ν)': f"{g['vega']:.4f}",
-        'Taxa Bruta': f"{retorno_imediato:.2f}%",
-        # Guarda valores numéricos brutos para algoritmo de decisão
-        '_raw': {**op, **g, 'vrp': vrp, 'retorno_imediato': retorno_imediato}
-    })
-
-df_lanc = pd.DataFrame(dados_lanc_processados)
-st.dataframe(df_lanc.drop(columns=['_raw']), use_container_width=True)
-
-# Algoritmo de Decisão e Recomendação para Lançamento
-st.markdown("#### 💬 Recomendação de Lançamento (Literatura + Mercado)")
-
-best_lanc = None
-best_score = -999.0
-
-for d in dados_lanc_processados:
-    raw = d['_raw']
-    # Score ponderado: VRP + IV Rank + Decay Theta - Risco Gamma exagerado
-    score = (raw['vrp'] * 1.5) + (raw['iv_rank'] * 0.8) + (abs(raw['theta_pct']) * 20.0) - (raw['gamma'] * 10.0)
-    if score > best_score:
-        best_score = score
-        best_lanc = raw
-
-if best_lanc:
-    st.success(f"📌 **Opção Recomendada para Lançamento:** `{best_lanc['ticker']}` (Strike R$ {best_lanc['strike']:.2f})")
-    
-    c1, c2, c3, c4 = st.columns(4)
-    c1.write(f"**Natenberg (VRP & Edge):** VRP em `{best_lanc['vrp']:+.2f}%` e IV Rank em `{best_lanc['iv_rank']:.1f}%`. Indica prêmio de volatilidade rico frente ao histórico.")
-    c2.write(f"**Sinclair (Preço Teórico):** Mercado a `R$ {best_lanc['preco_mkt']:.2f}` vs Teórico a `R$ {best_lanc['preco_teorico']:.2f}`. Venda com margem sobre o modelo.")
-    c3.write(f"**Taleb (Gama e Cauda):** Gamma em `{best_lanc['gamma']:.4f}` e DTE de `{best_lanc['dte']}d`. Nível de aceleração direcional dentro da margem de controle.")
-    c4.write(f"**Rule of Thumb:** Retorno bruto sobre a ação de `{best_lanc['retorno_imediato']:.2f}%` no período com taxa diária de Theta de `{best_lanc['theta_pct']:.3f}%`.")
+st.subheader("🔄 3. Opções de Compra (Calls) para Rolagem")
+qtd_rol = st.radio("Quantidade de Opções a Avaliar para Rolagem:", [1, 2, 3], horizontal=True, key="qtd_rol")
+opcoes_rolagem = capturar_entradas_opcoes_call("rol", qtd_rol)
 
 st.divider()
 
 # ==============================================================================
-# 4. MÓDULO II: ANÁLISE DE ROLAGEM (ATÉ 3 CALLS COM FLAG DE EXPANSÃO)
+# 4. BOTÃO DE ANÁLISE E EXECUTOR DO DIAGNÓSTICO
 # ==============================================================================
-
-st.subheader("2️⃣ Análise de Rolagem de Opções de Compra (Calls)")
-flag_rolagem = st.checkbox("🚩 Ativar / Expandir Campos de Análise para Rolagem", value=True)
-
-if flag_rolagem:
-    qtd_rol = st.radio("Quantidade de opções a avaliar para Rolagem:", [1, 2, 3], horizontal=True, key="qtd_rol")
-    opcoes_rol = capturar_entradas_opcoes("rol", qtd_rol, dte_default=60)
+if st.button("📊 Executar Análise Integrada (Natenberg, Sinclair, Taleb & Mercado)", type="primary", use_container_width=True):
     
-    dados_rol_processados = []
-    for op in opcoes_rol:
-        prov_aplicado = provento_liq if (flag_proventos and data_ex and data_ex <= op['vencimento']) else 0.0
-        g = calcular_bsm_e_gregas(S, op['strike'], op['dte'], r, op['iv'], prov_aplicado)
-        vrp = (op['iv'] - op['hv']) * 100.0
+    st.markdown("## 📈 Resultado da Análise de Mercado e Literatura")
+    
+    # Cálculo do Variance Risk Premium (VRP) Geral
+    vrp_geral = vol_implicita - vol_historica
+    
+    # --------------------------------------------------------------------------
+    # QUADRO COMPARATIVO - LANÇAMENTO INICIAL
+    # --------------------------------------------------------------------------
+    st.markdown("### 📋 Tabela Comparativa: Lançamento Inicial")
+    
+    dados_tab_lanc = []
+    for op in opcoes_lancamento:
+        retorno_bruto = (op['preco'] / preco_acao) * 100.0
+        diff_teorico = op['preco'] - op['preco_teorico']
         
-        # Comparativo direto de crédito/débito contra a opção recomendada do lançamento inicial
-        credito_liquido = op['preco_mkt'] - (best_lanc['preco_mkt'] if best_lanc else 0.0)
+        # Análise de impacto de proventos
+        prov_afeta = flag_proventos and data_ex and (data_ex <= op['vencimento'])
+        desc_prov = f"R$ {provento_liq:.2f} (Ex: {data_ex.strftime('%d/%m/%Y')})" if prov_afeta else "Nenhum no período"
         
-        dados_rol_processados.append({
-            'Ticker': op['ticker'],
-            'Strike': f"R$ {op['strike']:.2f}",
-            'Preço Mercado': f"R$ {op['preco_mkt']:.2f}",
-            'Preço Teórico': f"R$ {g['preco_teorico']:.2f}",
-            'Vencimento': op['vencimento'].strftime('%d/%m/%Y'),
-            'DTE': op['dte'],
-            'IV %': f"{op['iv']*100:.2f}%",
-            'IV Rank': f"{op['iv_rank']:.1f}%",
-            'HV %': f"{op['hv']*100:.2f}%",
-            'HV Rank': f"{op['hv_rank']:.1f}%",
-            'VRP (IV-HV)': f"{vrp:+.2f}%",
-            'Delta (Δ)': f"{g['delta']:.4f}",
-            'Gamma (γ)': f"{g['gamma']:.4f}",
-            'Theta (%/dia)': f"{g['theta_pct']:.3f}%",
-            'Vega (ν)': f"{g['vega']:.4f}",
-            'Dif. Crédito/Débito': f"R$ {credito_liquido:+.2f}",
-            '_raw': {**op, **g, 'vrp': vrp, 'credito_liquido': credito_liquido}
+        dados_tab_lanc.append({
+            "Ticker Opção": op['ticker'],
+            "Preço Mercado": f"R$ {op['preco']:.2f}",
+            "Strike (K)": f"R$ {op['strike']:.2f}",
+            "Preço Teórico": f"R$ {op['preco_teorico']:.2f}",
+            "Dif. vs Teórico": f"R$ {diff_teorico:+.2f}",
+            "Vencimento": op['vencimento'].strftime('%d/%m/%Y'),
+            "DTE": f"{op['dte']}d",
+            "Delta (Δ)": f"{op['delta']:.4f}",
+            "Gamma (γ)": f"{op['gamma']:.4f}",
+            "Theta (%)": f"{op['theta_pct']:.3f}%",
+            "Vega (ν)": f"{op['vega']:.4f}",
+            "Retorno Bruto": f"{retorno_bruto:.2f}%",
+            "Provento": desc_prov
+        })
+    
+    st.table(pd.DataFrame(dados_tab_lanc))
+    
+    # Algoritmo de Escolha da Melhor Opção para Lançamento
+    melhor_lanc = None
+    maior_score_lanc = -999.0
+    
+    for op in opcoes_lancamento:
+        ret_bruto = (op['preco'] / preco_acao) * 100.0
+        diff_t = op['preco'] - op['preco_teorico']
+        # Score ponderado considerando VRP, DTE, Delta, Gamma e Preço Teórico
+        score = (diff_t * 2.0) + (ret_bruto * 1.5) + (abs(op['theta_pct']) * 10.0) - (op['gamma'] * 15.0)
+        if score > maior_score_lanc:
+            maior_score_lanc = score
+            melhor_lanc = op
+
+    # --------------------------------------------------------------------------
+    # QUADRO COMPARATIVO - ROLAGEM
+    # --------------------------------------------------------------------------
+    st.markdown("### 📋 Tabela Comparativa: Rolagem")
+    
+    dados_tab_rol = []
+    for op in opcoes_rolagem:
+        diff_teorico = op['preco'] - op['preco_teorico']
+        credito_liquido = op['preco'] - melhor_lanc['preco'] if melhor_lanc else 0.0
+        
+        prov_afeta = flag_proventos and data_ex and (data_ex <= op['vencimento'])
+        desc_prov = f"R$ {provento_liq:.2f} (Ex: {data_ex.strftime('%d/%m/%Y')})" if prov_afeta else "Nenhum no período"
+        
+        dados_tab_rol.append({
+            "Ticker Opção": op['ticker'],
+            "Preço Mercado": f"R$ {op['preco']:.2f}",
+            "Strike (K)": f"R$ {op['strike']:.2f}",
+            "Preço Teórico": f"R$ {op['preco_teorico']:.2f}",
+            "Dif. vs Teórico": f"R$ {diff_teorico:+.2f}",
+            "Vencimento": op['vencimento'].strftime('%d/%m/%Y'),
+            "DTE": f"{op['dte']}d",
+            "Delta (Δ)": f"{op['delta']:.4f}",
+            "Gamma (γ)": f"{op['gamma']:.4f}",
+            "Theta (%)": f"{op['theta_pct']:.3f}%",
+            "Vega (ν)": f"{op['vega']:.4f}",
+            "Dif. Crédito/Débito": f"R$ {credito_liquido:+.2f}",
+            "Provento": desc_prov
         })
         
-    df_rol = pd.DataFrame(dados_rol_processados)
-    st.dataframe(df_rol.drop(columns=['_raw']), use_container_width=True)
-    
-    # Algoritmo de Decisão para Rolagem
-    st.markdown("#### 💬 Recomendação de Rolagem (Literatura + Mercado)")
-    
-    best_rol = None
-    best_rol_score = -999.0
-    
-    for d in dados_rol_processados:
-        raw = d['_raw']
-        # Score de rolagem favorece crédito positivo, redução de Gamma e alto IV Rank
-        score = (raw['credito_liquido'] * 5.0) + (raw['iv_rank'] * 0.5) - (raw['gamma'] * 15.0) + (abs(raw['theta_pct']) * 10.0)
-        if score > best_rol_score:
-            best_rol_score = score
-            best_rol = raw
+    st.table(pd.DataFrame(dados_tab_rol))
 
-    if best_rol:
-        st.info(f"🔄 **Opção Recomendada para Rolagem:** `{best_rol['ticker']}` (Strike R$ {best_rol['strike']:.2f})")
-        
-        r1, r2, r3, r4 = st.columns(4)
-        r1.write(f"**Natenberg (Regressão à Média):** Manutenção do trade com IV Rank em `{best_rol['iv_rank']:.1f}%`. Captura o prêmio de volatilidade diferido no tempo.")
-        r2.write(f"**Sinclair (Precificação BSM):** Preço de mercado `R$ {best_rol['preco_mkt']:.2f}` comparado ao teórico de `R$ {best_rol['preco_teorico']:.2f}`.")
-        r3.write(f"**Taleb (Redução de Fragilidade):** Gamma reduzido para `{best_rol['gamma']:.4f}` ao estender o DTE para `{best_rol['dte']}d`, atenuando o risco de cauda de vencimento curto.")
-        r4.write(f"**Rule of Thumb do Mercado:** Genera um diferencial líquido financeiro de `{best_rol['credito_liquido']:+.2f} R$` (regra do *Roll for a Credit*).")
+    # Algoritmo de Escolha da Melhor Opção para Rolagem
+    melhor_rol = None
+    maior_score_rol = -999.0
     
+    for op in opcoes_rolagem:
+        credito = op['preco'] - melhor_lanc['preco']
+        diff_t = op['preco'] - op['preco_teorico']
+        score = (credito * 3.0) + (diff_t * 2.0) - (op['gamma'] * 20.0) + (abs(op['theta_pct']) * 8.0)
+        if score > maior_score_rol:
+            maior_score_rol = score
+            melhor_rol = op
+
+    # --------------------------------------------------------------------------
+    # DIAGNÓSTICO E PARECER TÉCNICO COMPLETO
+    # --------------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("## 💡 Indicação e Justificativas Teóricas / Práticas")
+    
+    col_ind1, col_ind2 = st.columns(2)
+    
+    with col_ind1:
+        st.success(f"🎯 **Indicação para Lançamento Inicial:** `{melhor_lanc['ticker']}` (Strike: R$ {melhor_lanc['strike']:.2f})")
+        
+        st.markdown("**Razões da Indicação (Lançamento):**")
+        st.write(f"• **Sheldon Natenberg (Volatilidade & VRP):** O IV Rank da ação está em `{iv_rank:.2f}%` e o Variance Risk Premium (IV - HV) está positivo em `{vrp_geral:+.2f}%`. A opção selecionada permite vender volatilidade superavaliada com boa margem.")
+        st.write(f"• **Euan Sinclair (Edge & Preço Teórico):** O preço de mercado de `R$ {melhor_lanc['preco']:.2f}` apresenta uma sobreprecificação de `R$ {melhor_lanc['preco'] - melhor_lanc['preco_teorico']:+.2f}` em relação ao Preço Teórico fornecido (`R$ {melhor_lanc['preco_teorico']:.2f}`), capturando a borda estatística de venda.")
+        st.write(f"• **Nassim Taleb (Curva e Controle de Gamma):** O Gamma está controlado em `{melhor_lanc['gamma']:.4f}`, minimizando a fragilidade do portfólio a choques severos do ativo no vencimento de `{melhor_lanc['dte']} dias`.")
+        st.write(f"• **Rule of Thumb do Mercado:** Gera uma taxa de retorno direta de `{((melhor_lanc['preco']/preco_acao)*100):.2f}%` no período com um decaimento diário de Theta de `{melhor_lanc['theta_pct']:.3f}%`.")
+        if flag_proventos and data_ex and (data_ex <= melhor_lanc['vencimento']):
+            st.write(f"• **Impacto do Provento:** Considera captura do provento de `R$ {provento_liq:.2f}` no período antes do vencimento.")
+
+    with col_ind2:
+        st.info(f"🔄 **Indicação para Rolagem:** `{melhor_rol['ticker']}` (Strike: R$ {melhor_rol['strike']:.2f})")
+        
+        credito_rol = melhor_rol['preco'] - melhor_lanc['preco']
+        st.markdown("**Razões da Indicação (Rolagem):**")
+        st.write(f"• **Rule of Thumb do Mercado (Roll for Credit):** A rolagem para `{melhor_rol['ticker']}` gera um resultado líquido financeiro de `R$ {credito_rol:+.2f}`, respeitando a regra clássica de não rolar com débito.")
+        st.write(f"• **Nassim Taleb (Atenuação do Risco Gamma):** Ao estender o prazo para `{melhor_rol['dte']} dias`, o Gamma é ajustado para `{melhor_rol['gamma']:.4f}`, reduzindo drasticamente o risco de não-linearidade próximo do vencimento.")
+        st.write(f"• **Euan Sinclair & Natenberg:** Permite continuar vendido na curva de volatilidade implícita (IV `{vol_implicita:.2f}%` vs HV `{vol_historica:.2f}%`), mantendo a captura do prêmio de volatilidade com um Preço Teórico de `R$ {melhor_rol['preco_teorico']:.2f}`.")
+        st.write(f"• **Decaimento Temporal:** Mantém uma captura diária de Theta de `{melhor_rol['theta_pct']:.3f}%` sobre a nova estrutura.")
+        if flag_proventos and data_ex and (data_ex <= melhor_rol['vencimento']):
+            st.write(f"• **Impacto do Provento:** Ajustado para captura do fluxo de caixa de `R$ {provento_liq:.2f}` até a data EX.")
+        

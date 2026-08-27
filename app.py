@@ -6,7 +6,7 @@ import numpy as np
 st.set_page_config(page_title="Venda Coberta Pro", layout="centered")
 
 st.title("🎯 Venda Coberta (Covered Call)")
-st.caption("Análise Quantitativa & Rule of Thumb | Natenberg, Sinclair & Taleb")
+st.caption("Análise Quantitativa | Deltas, Vega & Rule of Thumb")
 
 # Inputs Principais da Ação
 st.subheader("1. Ativo Subjacente")
@@ -24,95 +24,99 @@ with col_c:
 with col_d:
     vol_historica = st.number_input("Vol Histórica Anual (%)", value=24.0, step=1.0)
 
-dias_vencimento = st.number_input("Dias Úteis até o Vencimento (DTE)", value=22, step=1)
-
 st.divider()
 
-# Função para input das opções
-def entrada_opcao(rotulo_delta, d_def, premio_def, strike_def, ticker_def):
-    st.subheader(f"Opção - Referência Delta ~{rotulo_delta}")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        ticker = st.text_input(f"Ticker", value=ticker_def, key=f"t_{rotulo_delta}")
-        strike = st.number_input(f"Strike", value=strike_def, key=f"s_{rotulo_delta}")
-    with c2:
-        premio = st.number_input(f"Prêmio", value=premio_def, key=f"p_{rotulo_delta}")
-        delta = st.number_input(f"Delta", value=d_def, key=f"d_{rotulo_delta}")
-    with c3:
-        gamma = st.number_input(f"Gamma", value=0.04, key=f"g_{rotulo_delta}")
-        theta_pct = st.number_input(f"Theta/Dia (%)", value=-0.15, key=f"th_{rotulo_delta}")
-    return {
-        "Ticker": ticker, "Strike": strike, "Prêmio": premio, 
-        "Delta": delta, "Gamma": gamma, "ThetaPct": theta_pct
-    }
+# Função para input dinâmico das opções
+def entrada_opcao(num, rotulo_delta, d_def, premio_def, strike_def, ticker_def, vega_def):
+    # Opções 1 e 2 vêm ativadas por padrão para garantir o mínimo de 2
+    ativo_padrao = True if num in [1, 2] else False
+    
+    ativo = st.checkbox(f"Ativar Opção {num} (Ref. Delta ~{rotulo_delta})", value=ativo_padrao, key=f"chk_{num}")
+    
+    if ativo:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            ticker = st.text_input(f"Ticker", value=ticker_def, key=f"t_{num}")
+            strike = st.number_input(f"Strike", value=strike_def, key=f"s_{num}")
+        with c2:
+            premio = st.number_input(f"Prêmio", value=premio_def, key=f"p_{num}")
+            delta = st.number_input(f"Delta", value=d_def, key=f"d_{num}")
+        with c3:
+            theta_pct = st.number_input(f"Theta/Dia (%)", value=-0.15, key=f"th_{num}")
+            vega = st.number_input(f"Vega", value=vega_def, key=f"v_{num}")
+            
+        return {
+            "Ticker": ticker, "Strike": strike, "Prêmio": premio, 
+            "Delta": delta, "ThetaPct": theta_pct, "Vega": vega
+        }
+    return None
 
-# Cadastro das 3 Opções
-op1 = entrada_opcao("30", 0.30, 1.20, 40.00, "PETRJ400")
-op2 = entrada_opcao("20", 0.20, 0.65, 41.50, "PETRJ415")
-op3 = entrada_opcao("15", 0.15, 0.35, 42.50, "PETRJ425")
+st.subheader("2. Opções Europeias (Selecione pelo menos 2)")
+op1 = entrada_opcao(1, "30", 0.30, 1.20, 40.00, "PETRJ400", 0.08)
+op2 = entrada_opcao(2, "20", 0.20, 0.65, 41.50, "PETRJ415", 0.06)
+op3 = entrada_opcao(3, "15", 0.15, 0.35, 42.50, "PETRJ425", 0.04)
 
 st.divider()
 
 if st.button("🚀 Analisar Opções", use_container_width=True):
-    # Processamento de Dados
-    dados = [op1, op2, op3]
-    df = pd.DataFrame(dados)
-
-    # Métricas de Rendimento e Proteção
-    df["Taxa Bruta (%)"] = (df["Prêmio"] / preco_acao) * 100
-    df["Proteção de Queda (%)"] = df["Taxa Bruta (%)"]
-    df["Distância do Strike (%)"] = ((df["Strike"] - preco_acao) / preco_acao) * 100
-    df["Retorno Máx. (Com Exercício) (%)"] = df["Taxa Bruta (%)"] + df["Distância do Strike (%)"]
-
-    # Exibição Comparativa
-    st.subheader("📊 Comparativo Técnico")
-    st.dataframe(
-        df[["Ticker", "Delta", "Strike", "Prêmio", "Taxa Bruta (%)", "Distância do Strike (%)", "Retorno Máx. (Com Exercício) (%)"]],
-        hide_index=True,
-        use_container_width=True
-    )
-
-    # Raciocínio Quantitativo / Racional dos Autores
-    st.subheader("🧠 Racional de Mercado & Literatura")
-
-    edge_vol = vol_implicita - vol_historica
+    # Filtra apenas as opções que foram ativadas no checkbox
+    dados = [op for op in [op1, op2, op3] if op is not None]
     
-    # 1. Análise de Regime de Volatilidade (Natenberg & Sinclair)
-    st.markdown("### 1. Volatilidade & Edge (Natenberg / Sinclair)")
-    if iv_rank > 50 and edge_vol > 0:
-        st.success(f"**EDGE POSITIVO:** IV Rank em {iv_rank:.1f}% e Vol Implícita está {edge_vol:.1f}% acima da Histórica. Vender volatilidade cara favorece estatisticamente o lançador.")
-    elif iv_rank < 30:
-        st.warning(f"**ALERTA DE VOLATILIDADE BAIXA:** IV Rank em {iv_rank:.1f}%. O prêmio coletado é reduzido em termos absolutos. A relação risco/retorno para venda coberta piora.")
+    if len(dados) < 2:
+        st.error("⚠️ Por favor, ative pelo menos DUAS opções para realizar a comparação.")
     else:
-        st.info(f"**VOLATILIDADE NEUTRA:** IV Rank em {iv_rank:.1f}%. A precificação está em linha com as médias históricas.")
+        df = pd.DataFrame(dados)
 
-    # 2. Avaliação de Convexidade e Risco de Calda (Taleb)
-    st.markdown("### 2. Gestão de Risco de Calda (Taleb)")
-    st.write("A venda de Call possui distribuição de retornos assimétrica negativa (ganho limitado, risco ilimitado na queda do subjacente). As opções sendo europeias eliminam o risco de exercício antecipado, mas mantêm a exposição integral ao *delta* em quedas acentuadas.")
+        # Métricas de Rendimento e Proteção
+        df["Taxa Bruta (%)"] = (df["Prêmio"] / preco_acao) * 100
+        df["Distância Strike (%)"] = ((df["Strike"] - preco_acao) / preco_acao) * 100
+        df["Retorno Máx. (%)"] = df["Taxa Bruta (%)"] + df["Distância Strike (%)"]
 
-    # 3. Escolha Recomendada (Rule of Thumb)
-    st.markdown("### 3. Veredito: Escolha da Opção")
+        # Exibição Comparativa
+        st.subheader("📊 Comparativo Técnico")
+        st.dataframe(
+            df[["Ticker", "Delta", "Vega", "Strike", "Prêmio", "Taxa Bruta (%)", "Retorno Máx. (%)"]],
+            hide_index=True,
+            use_container_width=True
+        )
 
-    # Seleção baseada em heurística clássica de mesas quantitativas
-    if iv_rank >= 60:
-        # Alta vol -> delta menor recolhe bom prêmio mantendo maior margem de segurança
-        rec = df[df["Delta"] <= 0.22].sort_values(by="Delta", ascending=False).iloc[0]
-        motivo = "Com IV Rank alto, preferimos coletar prêmios elevados com menor probabilidade de ser exercido (Delta 15-20), ampliando a margem de segurança do ativo."
-    elif iv_rank <= 30:
-        # Baixa vol -> delta 30 para compensar o prêmio baixo
-        rec = df.loc[df["Delta"].abs_sub(0.30).idxmin()]
-        motivo = "Com IV Rank baixo, deltas menores oferecem prêmios irrelevantes. O Delta ~30 garante a taxa mínima necessária para rentabilizar a custódia."
-    else:
-        # Vol média -> delta 20/25 intermediário
-        rec = df.loc[df["Delta"].abs_sub(0.20).idxmin()]
-        motivo = "Em regime de volatilidade moderada, o Delta ~20 oferece o melhor equilíbrio entre taxa de retenção do prêmio e espaço para valorização do papel."
+        st.subheader("🧠 Racional de Mercado (Natenberg, Sinclair & Taleb)")
 
-    st.markdown(f"""
-    > **Opção Recomendada:** `{rec['Ticker']}` (Delta {rec['Delta']})
-    > * **Prêmio:** R$ {rec['Prêmio']:.2f} ({rec['Taxa Bruta (%)']:.2f}%)
-    > * **Distância do Strike:** {rec['Distância do Strike (%)']:.2f}%
-    > * **Retorno Máximo no Vencimento:** {rec['Retorno Máx. (Com Exercício) (%)']:.2f}%
-    
-    **Justificativa Técnica:** {motivo}
-    """)
-                                    
+        edge_vol = vol_implicita - vol_historica
+        
+        # Análise de Volatilidade e Vega
+        st.markdown("### 1. Exposição ao Vega & Regime de Volatilidade")
+        if iv_rank > 50:
+            st.success(f"**FAVORÁVEL (Vol Crush):** IV Rank alto ({iv_rank:.1f}%). Ao lançar a opção, você fica **Short Vega**. Opções com Vega maior sofrerão desvalorização mais rápida se a volatilidade implícita cair para a média histórica, antecipando o lucro.")
+        elif iv_rank < 30:
+            st.warning(f"**RISCO DE VEGA:** IV Rank baixo ({iv_rank:.1f}%). Risco de expansão de volatilidade. Estar Short Vega agora significa que se a IV subir, o prêmio da opção vai encarecer contra você, dificultando a recompra.")
+        else:
+            st.info(f"**VEGA NEUTRO:** IV Rank em {iv_rank:.1f}%. A exposição ao Vega terá impacto marginal comparado ao Theta (passagem do tempo) e Delta (direção).")
+
+        # Escolha Recomendada (Rule of Thumb)
+        st.markdown("### 2. Veredito: Escolha da Opção")
+
+        if iv_rank >= 60:
+            # Alta vol -> delta menor, priorizar recolher prêmio seguro. Desempate por maior Vega relativo se quiser surfar o Vol Crush.
+            rec = df[df["Delta"] <= 0.22].sort_values(by="Delta", ascending=False)
+            if not rec.empty:
+                rec = rec.iloc[0]
+            else:
+                rec = df.iloc[0]
+            motivo = f"IV Rank alto. Coletamos prêmios inflados em Deltas mais seguros (15-20). Como estamos apostando na queda da volatilidade, a exposição Short Vega ({rec['Vega']}) desta opção vai acelerar a depreciação do prêmio a nosso favor."
+        elif iv_rank <= 30:
+            # Baixa vol -> delta 30 para ter taxa. 
+            rec = df.loc[(df["Delta"] - 0.30).abs().idxmin()]
+            motivo = f"IV Rank baixo. O prêmio em deltas fora do dinheiro é pífio. Buscamos o Delta mais próximo de 30 para garantir taxa. Cuidado com o Vega de {rec['Vega']}, pois um salto na volatilidade jogará o preço da opção contra a posição."
+        else:
+            # Vol média
+            rec = df.loc[(df["Delta"] - 0.20).abs().idxmin()]
+            motivo = "Regime de volatilidade moderada. O Delta ~20 oferece o 'Sweet Spot' entre taxa de retenção do prêmio e margem para alta do ativo subjacente sem grande stress no Vega."
+
+        st.markdown(f"""
+        > **Opção Recomendada:** `{rec['Ticker']}` (Delta {rec['Delta']} | Vega {rec['Vega']})
+        > * **Prêmio:** R$ {rec['Prêmio']:.2f} ({rec['Taxa Bruta (%)']:.2f}%)
+        > * **Retorno Máximo no Vencimento:** {rec['Retorno Máx. (%)']:.2f}%
+        
+        **Justificativa:** {motivo}
+        """)

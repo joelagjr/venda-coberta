@@ -21,7 +21,7 @@ st.markdown("""
 > **Fundamentação Teórica Integrada:**
 > * **Sheldon Natenberg (*Option Volatility and Pricing*):** Explora a dinâmica de *Volatility Skew*, *Variance Risk Premium* ($VRP = IV - HV$) e a assimetria a favor do vendedor de volatilidade em regimes de IV Rank elevado.
 > * **Euan Sinclair (*Option Trading* & *Positional Option Trading*):** Foco rigoroso na identificação de *Edge* estatístico comparando o preço de mercado da opção com o Preço Teórico (*Fair Value*) para garantir expectativa matemática positiva ($E[X] > 0$).
-> * **Nassim Nicholas Taleb (*Dynamic Hedging*):** Gestão rigorosa de convexidade e riscos não-lineares. Alerta sobre a fragilidade de vender *Gamma* curto perto do vencimento e a importância de conter o risco de cauda (*tail risk*).
+> * **Nassim Nicholas Taleb (*Dynamic Hedging*):** Gestão rigorosa de convexidade, risco de exercício antecipado em opções americanas e atenuação da fragilidade ao vender *Gamma* curto perto do vencimento.
 """)
 
 st.divider()
@@ -43,7 +43,7 @@ def calcular_dias_uteis_br(data_inicio, data_fim):
 
 @st.cache_data(ttl=300)
 def obter_preco_acao_yfinance(ticker):
-    """Obtém preço atualizado do ticker na B3 via Yahoo Finance (equivalente ao BVMF:TICKER no Google Finance)"""
+    """Obtém preço atualizado do ticker na B3 via Yahoo Finance"""
     try:
         ticker_b3 = f"{ticker.upper()}.SA"
         dados = yf.Ticker(ticker_b3)
@@ -56,7 +56,6 @@ def obter_preco_acao_yfinance(ticker):
             return float(hist["Close"].iloc[-1])
     except Exception:
         pass
-    # Contingência de preços caso a API demore a responder
     defaults = {"PETR4": 38.50, "VALE3": 62.10, "BBDC4": 14.80, "BBAS3": 27.40, "ITUB4": 35.20}
     return defaults.get(ticker.upper(), 30.00)
 
@@ -77,7 +76,7 @@ with col_ac1:
         value=float(preco_auto),
         step=0.10,
         format="%.2f",
-        help="Preço puxado automaticamente da B3 via API (equivalente ao BVMF:TICKER no Google Finance). Editável."
+        help="Preço puxado automaticamente da B3 via API. Editável."
     )
 
 with col_ac2:
@@ -112,9 +111,10 @@ def capturar_entradas_opcoes_call(prefixo, quantidade, modo_rolagem=False):
             titulo_box = f"Opção Call #{i+1}" if not modo_rolagem else (f"Opção Já Lançada" if quantidade==1 else f"Opção Call #{i+1}")
             st.markdown(f"##### {titulo_box}")
             ticker_op = st.text_input(f"Ticker da Opção", value=f"{ticker_acao}_CALL{i+1}", key=f"{prefixo}_tick_{i}").upper()
+            estilo_op = st.selectbox(f"Estilo do Exercício", options=["Americana", "Europeia"], index=0, key=f"{prefixo}_est_{i}")
             preco_op = st.number_input(f"Preço de Mercado (R$)", value=1.45 - (i * 0.30), step=0.05, format="%.2f", key=f"{prefixo}_p_{i}")
             strike_op = st.number_input(f"Preço de Strike (R$)", value=preco_acao + (i * 1.50), step=0.50, format="%.2f", key=f"{prefixo}_k_{i}")
-            preco_teorico = st.number_input(f"Preço Teórico (R$)", value=1.38 - (i * 0.28), step=0.05, format="%.2f", key=f"{prefixo}_pt_{i}")
+            preco_teorico = st.number_input(f"Preço Teórico / Fair Value (R$)", value=1.38 - (i * 0.28), step=0.05, format="%.2f", key=f"{prefixo}_pt_{i}", help="Modelo Black-Scholes (Europeia) ou Binarial/Bjerksund-Stensland (Americana)")
             
             dias_uteis_input = st.number_input(
                 f"Dias Úteis Faltantes (d.u.)",
@@ -133,6 +133,7 @@ def capturar_entradas_opcoes_call(prefixo, quantidade, modo_rolagem=False):
             
             opcoes.append({
                 'ticker': ticker_op,
+                'estilo': estilo_op,
                 'preco': preco_op,
                 'strike': strike_op,
                 'preco_teorico': preco_teorico,
@@ -161,8 +162,6 @@ executar_rolagem = st.checkbox("Ativar corrida de simulação para Rolagem da Op
 
 if executar_rolagem:
     st.warning("⚠️ **Regra de Rolagem Ativa:** Na Simulação I, insira **apenas 1 opção** (representando a opção já lançada na sua carteira). Na Simulação II abaixo, insira as opções candidatas para a rolagem.")
-    qtd_lanc_efetiva = 1
-    st.info("📌 **Simulação I ajustada para 1 opção** (Opção Atualmente Lançada pelo Investidor).")
     opcoes_lancamento = capturar_entradas_opcoes_call("lanc", 1, modo_rolagem=True)
     
     qtd_rol = st.radio("Quantidade de opções a avaliar para Rolagem:", [1, 2, 3], horizontal=True, key="qtd_rol")
@@ -198,6 +197,7 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
             
             dados_tab_lanc.append({
                 "Ticker Opção": op['ticker'],
+                "Estilo": op['estilo'],
                 "Preço Mercado": f"R$ {op['preco']:.2f}",
                 "Strike (K)": f"R$ {op['strike']:.2f}",
                 "Preço Teórico": f"R$ {op['preco_teorico']:.2f}",
@@ -206,14 +206,12 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
                 "Delta (Δ)": f"{op['delta']:.4f}",
                 "Gamma (γ)": f"{op['gamma']:.4f}",
                 "Theta (%)": f"{op['theta_pct']:.3f}%",
-                "Vega (ν)": f"{op['vega']:.4f}",
                 "Taxa Bruta": f"{retorno_bruto:.2f}%",
                 "Provento": desc_prov
             })
         
         st.table(pd.DataFrame(dados_tab_lanc))
         
-        # Algoritmo de Avaliação Baseado na Literatura (Sinclair + Natenberg + Taleb)
         melhor_lanc = None
         maior_score = -9999.0
         
@@ -229,18 +227,18 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
                 melhor_lanc = op
 
         st.markdown("---")
-        st.success(f"🎯 **RECOMENDAÇÃO DE LANÇAMENTO INICIAL:** `{melhor_lanc['ticker']}` (Strike: R$ {melhor_lanc['strike']:.2f} | Prêmio: R$ {melhor_lanc['preco']:.2f})")
+        st.success(f"🎯 **RECOMENDAÇÃO DE LANÇAMENTO INICIAL:** `{melhor_lanc['ticker']}` ({melhor_lanc['estilo']} | Strike: R$ {melhor_lanc['strike']:.2f} | Prêmio: R$ {melhor_lanc['preco']:.2f})")
         
         diff_edge = melhor_lanc['preco'] - melhor_lanc['preco_teorico']
         taxa_op = (melhor_lanc['preco'] / preco_acao) * 100.0
         
         st.markdown("### 💡 Racional Técnico e Fundamentação Teórica:")
-        st.write(f"• **Sheldon Natenberg (Volatilidade & VRP):** O IV Rank da ação encontra-se em `{iv_rank:.2f}%` e o *Variance Risk Premium* (IV - HV) está positivo em `{vrp_geral:+.2f}%`. Segundo Natenberg, este cenário favorece a venda de volatilidade implícita inflacionada, garantindo que o prêmio cobrado supere a volatilidade realizada histórica (`{vol_historica:.2f}%`).")
-        st.write(f"• **Euan Sinclair (Edge Estatístico & Preço Teórico):** A opção `{melhor_lanc['ticker']}` apresenta um *Edge* positivo de `R$ {diff_edge:+.2f}` em relação ao Preço Teórico (`R$ {melhor_lanc['preco_teorico']:.2f}`). Para Sinclair, negociar com sobrepreço em relação ao *Fair Value* é a condição indispensável para uma expectativa matemática positiva ($E[X] > 0$).")
-        st.write(f"• **Nassim Nicholas Taleb (Convexidade & Risco Gamma):** A escolha mantém um Gamma controlado de `{melhor_lanc['gamma']:.4f}` ao longo de `{melhor_lanc['dte_uteis']} dias úteis`. Taleb alerta contra vender opções com Gamma excessivamente alto perto do vencimento, pois a aceleração não-linear pode destruir a carteira em movimentos bruscos do ativo.")
-        st.write(f"• **Regra Prática do Mercado (Yield & Decaimento):** A operação gera um retorno bruto imediato de `{taxa_op:.2f}%` sobre a ação com captura diária de Theta de `{melhor_lanc['theta_pct']:.3f}%`.")
+        st.write(f"• **Sheldon Natenberg (Volatilidade & VRP):** O IV Rank da ação está em `{iv_rank:.2f}%` e o *Variance Risk Premium* (IV - HV) está positivo em `{vrp_geral:+.2f}%`. O cenário valida a venda de volatilidade inflacionada.")
+        st.write(f"• **Euan Sinclair (Edge Estatístico & Preço Teórico):** A opção `{melhor_lanc['ticker']}` entrega um *Edge* de `R$ {diff_edge:+.2f}` frente ao Preço Teórico (`R$ {melhor_lanc['preco_teorico']:.2f}`). Para Sinclair, vender acima do Fair Value é o requisito essencial para expectativa matemática positiva ($E[X] > 0$).")
+        st.write(f"• **Nassim Nicholas Taleb (Estilo & Risco Gamma):** Opção do estilo **{melhor_lanc['estilo']}**. Taleb alerta que Calls Americanas com dividendos iminentes possuem risco de exercício antecipado (*early exercise*) se o valor temporal for inferior ao dividendo. Mantém-se o Gamma sob controle em `{melhor_lanc['gamma']:.4f}`.")
+        st.write(f"• **Yield & Decaimento:** Retorno bruto imediato de `{taxa_op:.2f}%` sobre a ação com captura diária de Theta de `{melhor_lanc['theta_pct']:.3f}%`.")
         if flag_proventos and data_ex and (data_ex <= melhor_lanc['vencimento']):
-            st.write(f"• **Impacto de Proventos:** A custódia captura o fluxo líquido de `R$ {provento_liq:.2f}` antes do exercício (Data Ex: {data_ex.strftime('%d/%m/%Y')}), aumentando a proteção contra queda (*break-even*).")
+            st.write(f"• **Impacto de Proventos:** A custódia assegura o fluxo de `R$ {provento_liq:.2f}` antes do exercício (Data Ex: {data_ex.strftime('%d/%m/%Y')}).")
 
     # --------------------------------------------------------------------------
     # MODALIDADE 2: SIMULAÇÃO II (ROLAGEM DA OPÇÃO LANCEI X OPÇÕES CANDIDATAS)
@@ -248,7 +246,7 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
     else:
         op_atual = opcoes_lancamento[0]
         
-        st.markdown(f"### 📋 Posição Atual (Opção Lançada): `{op_atual['ticker']}` | Strike: R$ {op_atual['strike']:.2f} | Preço Mercado Atual: R$ {op_atual['preco']:.2f}")
+        st.markdown(f"### 📋 Posição Atual (Opção Lançada): `{op_atual['ticker']}` ({op_atual['estilo']}) | Strike: R$ {op_atual['strike']:.2f} | Preço Mercado Atual: R$ {op_atual['preco']:.2f}")
         st.markdown("### 📋 Análise Comparativa para Rolagem da Opção")
         
         dados_tab_rol = []
@@ -261,6 +259,7 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
             
             dados_tab_rol.append({
                 "Ticker Rolagem": op['ticker'],
+                "Estilo": op['estilo'],
                 "Preço Mercado": f"R$ {op['preco']:.2f}",
                 "Strike (K)": f"R$ {op['strike']:.2f}",
                 "Crédito / Débito Líquido": f"R$ {credito_liquido:+.2f}",
@@ -275,7 +274,6 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
         
         st.table(pd.DataFrame(dados_tab_rol))
         
-        # Algoritmo de Rolagem: Busca Rolagem a Crédito (Rule of Thumb + Natenberg + Sinclair + Taleb)
         melhor_rol = None
         maior_score_rol = -9999.0
         
@@ -285,7 +283,6 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
             gamma_risk = op['gamma']
             theta_capture = abs(op['theta_pct'])
             
-            # Penalização severa para rolagens a débito (credito < 0)
             fator_credito = (credito * 10.0) if credito >= 0 else (credito * 50.0)
             
             score = fator_credito + (edge_sinclair * 3.0) + (theta_capture * 8.0) - (gamma_risk * 30.0)
@@ -297,14 +294,12 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
         credito_final = melhor_rol['preco'] - op_atual['preco']
         
         if credito_final >= 0:
-            st.success(f"🔄 **RECOMENDAÇÃO DE ROLAGEM A CRÉDITO:** Rolar `{op_atual['ticker']}` ➔ `{melhor_rol['ticker']}` (Strike: R$ {melhor_rol['strike']:.2f} | Crédito Líquido: **R$ {credito_final:+.2f}**)")
+            st.success(f"🔄 **RECOMENDAÇÃO DE ROLAGEM A CRÉDITO:** Rolar `{op_atual['ticker']}` ➔ `{melhor_rol['ticker']}` ({melhor_rol['estilo']} | Strike: R$ {melhor_rol['strike']:.2f} | Crédito Líquido: **R$ {credito_final:+.2f}**)")
         else:
             st.warning(f"⚠️ **ATENÇÃO PARA ROLAGEM:** A opção `{melhor_rol['ticker']}` é a melhor opção entre as avaliadas, porém resulta em Débito Líquido de **R$ {credito_final:+.2f}**.")
             
         st.markdown("### 💡 Racional Técnico e Fundamentação Teórica da Rolagem:")
-        st.write(f"• **Regra de Ouro do Mercado (Roll for Credit):** A rolagem proposta gera um resultado financeiro líquido de `R$ {credito_final:+.2f}` por opção. A literatura reforça que a venda coberta nunca deve ser rolada a débito, pois isso violaria a taxa de retorno original do trade.")
-        st.write(f"• **Nassim Nicholas Taleb (Atenuação do Risco Gamma):** Ao postergar o vencimento para `{melhor_rol['dte_uteis']} dias úteis`, reduz-se o Gamma de `{op_atual['gamma']:.4f}` para `{melhor_rol['gamma']:.4f}`. Isso elimina o risco de pinning e a instabilidade não-linear típica do término do contrato.")
-        st.write(f"• **Sheldon Natenberg & Euan Sinclair (Extensão da Venda de Volatilidade & Edge):** Mantém a posição exposta ao prêmio de volatilidade (IV Rank `{iv_rank:.2f}%` e VRP `{vrp_geral:+.2f}%`), capturando um *Edge* de `R$ {melhor_rol['preco'] - melhor_rol['preco_teorico']:+.2f}` em relação ao Preço Teórico da nova opção.")
-        if flag_proventos and data_ex and (data_ex <= melhor_rol['vencimento']):
-            st.write(f"• **Captura de Proventos:** A ampliação do prazo para {melhor_rol['dte_uteis']} d.u. garante o direito ao recebimento de `R$ {provento_liq:.2f}` por ação até a Data Ex ({data_ex.strftime('%d/%m/%Y')}).")
-    
+        st.write(f"• **Regra do Mercado (Roll for Credit):** Operação gerando `R$ {credito_final:+.2f}` por contrato. Evita-se rolar a débito para não consumir o *yield* base.")
+        st.write(f"• **Nassim Nicholas Taleb (Atenuação do Risco Gamma & Exercício):** A substituição reduz o Gamma de `{op_atual['gamma']:.4f}` para `{melhor_rol['gamma']:.4f}` ao estender o prazo para `{melhor_rol['dte_uteis']} d.u.`. Como a nova Call é **{melhor_rol['estilo']}**, o risco de exercício antecipado deve ser monitorado se houver proventos superiores ao prêmio remanescente.")
+        st.write(f"• **Sheldon Natenberg & Euan Sinclair (Edge em Novo Vencimento):** Explora a volatilidade inflacionada (IV Rank `{iv_rank:.2f}%`) capturando *Edge* de `R$ {melhor_rol['preco'] - melhor_rol['preco_teorico']:+.2f}` frente ao Preço Teórico.")
+        

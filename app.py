@@ -15,13 +15,13 @@ st.set_page_config(
 )
 
 st.title("📈 Análise de Venda Coberta de Calls")
-st.caption("Framework Quantitativo Integrado: Natenberg, Sinclair, Taleb & Mercado B3 (Ajustado por Dias Úteis/Feriados BR)")
+st.caption("Framework Quantitativo Integrado: Natenberg, Sinclair, Taleb & Mercado B3 (Ajustado por Proventos, Volatilidade e Gregas)")
 
 st.markdown("""
-> **Fundamentação Teórica Integrada:**
-> * **Sheldon Natenberg (*Option Volatility and Pricing*):** Explora a dinâmica de *Volatility Skew*, *Variance Risk Premium* ($VRP = IV - HV$) e a assimetria a favor do vendedor de volatilidade em regimes de IV Rank elevado.
-> * **Euan Sinclair (*Option Trading* & *Positional Option Trading*):** Foco rigoroso na identificação de *Edge* estatístico comparando o preço de mercado da opção com o Preço Teórico (*Fair Value*) para garantir expectativa matemática positiva ($E[X] > 0$).
-> * **Nassim Nicholas Taleb (*Dynamic Hedging*):** Gestão rigorosa de convexidade, risco de exercício antecipado em opções americanas e atenuação da fragilidade ao vender *Gamma* curto perto do vencimento.
+> **Fundamentação Teórica Integrada (Proventos & Volatilidade):**
+> * **Sheldon Natenberg (*Option Volatility and Pricing*):** Ajuste do preço do ativo subjacente pelo valor presente dos dividendos futuros ($S^* = S - PV(D)$) e o impacto do *Volatility Crush* pós-data ex.
+> * **Euan Sinclair (*Option Trading*):** Precificação teórica (*Fair Value*) incorporando dividendos para evitar distorções no cálculo do *Edge* ($Preço - Fair Value$).
+> * **Nassim Nicholas Taleb (*Dynamic Hedging*):** Risco de exercício antecipado (*early exercise*) em Calls Americanas quando $Prêmio\ Temporal < Dividendo$, alterando o perfil não-linear de Gamma ($\Gamma$) e Theta ($\Theta$).
 """)
 
 st.divider()
@@ -108,17 +108,19 @@ def capturar_entradas_opcoes_call(prefixo, quantidade, modo_rolagem=False):
     
     for i in range(quantidade):
         with cols[i]:
-            titulo_box = f"Opção Call #{i+1}" if not modo_rolagem else (f"Opção Já Lançada" if quantidade==1 else f"Opção Call #{i+1}")
+            titulo_box = f"Opção Call #{i+1}" if not modo_rolagem else (f"Opção Já Lançada na Carteira" if quantidade==1 else f"Opção Call #{i+1}")
             st.markdown(f"##### {titulo_box}")
             ticker_op = st.text_input(f"Ticker da Opção", value=f"{ticker_acao}_CALL{i+1}", key=f"{prefixo}_tick_{i}").upper()
-            estilo_op = st.selectbox(f"Estilo do Exercício", options=["Americana", "Europeia"], index=0, key=f"{prefixo}_est_{i}")
+            estilo_op = st.selectbox(f"Estilo do Exercício", options=["Europeia", "Americana"], index=0, key=f"{prefixo}_est_{i}")
             preco_op = st.number_input(f"Preço de Mercado (R$)", value=1.45 - (i * 0.30), step=0.05, format="%.2f", key=f"{prefixo}_p_{i}")
             strike_op = st.number_input(f"Preço de Strike (R$)", value=preco_acao + (i * 1.50), step=0.50, format="%.2f", key=f"{prefixo}_k_{i}")
-            preco_teorico = st.number_input(f"Preço Teórico / Fair Value (R$)", value=1.38 - (i * 0.28), step=0.05, format="%.2f", key=f"{prefixo}_pt_{i}", help="Modelo Black-Scholes (Europeia) ou Binarial/Bjerksund-Stensland (Americana)")
+            preco_teorico = st.number_input(f"Preço Teórico / Fair Value (R$)", value=1.38 - (i * 0.28), step=0.05, format="%.2f", key=f"{prefixo}_pt_{i}")
+            
+            val_du_default = 8 if (modo_rolagem and prefixo == "lanc") else int(21 + (i * 10))
             
             dias_uteis_input = st.number_input(
                 f"Dias Úteis Faltantes (d.u.)",
-                value=int(21 + (i * 10)),
+                value=val_du_default,
                 step=1,
                 min_value=1,
                 key=f"{prefixo}_du_{i}"
@@ -127,7 +129,7 @@ def capturar_entradas_opcoes_call(prefixo, quantidade, modo_rolagem=False):
             
             st.caption("Gregas da Opção (Natenberg & Taleb)")
             delta = st.number_input(f"Delta (Δ)", value=0.4500 - (i * 0.10), step=0.0100, format="%.4f", key=f"{prefixo}_d_{i}")
-            gamma = st.number_input(f"Gamma (γ)", value=0.0850 - (i * 0.0100), step=0.0050, format="%.4f", key=f"{prefixo}_g_{i}")
+            gamma = st.number_input(f"Gamma (γ)", value=0.0850 + (0.05 if val_du_default <= 10 else 0.0), step=0.0050, format="%.4f", key=f"{prefixo}_g_{i}")
             theta_pct = st.number_input(f"Theta (%) [Diário]", value=-0.125 - (i * 0.020), step=0.005, format="%.3f", key=f"{prefixo}_t_{i}")
             vega = st.number_input(f"Vega (ν)", value=0.0420 + (i * 0.0050), step=0.0050, format="%.4f", key=f"{prefixo}_v_{i}")
             
@@ -147,13 +149,13 @@ def capturar_entradas_opcoes_call(prefixo, quantidade, modo_rolagem=False):
     return opcoes
 
 # ==============================================================================
-# 2. SIMULAÇÃO I: LANÇAMENTO INICIAL DE CALLS (ATÉ 3 OPÇÕES)
+# 2. SIMULAÇÃO I: LANÇAMENTO INICIAL DE CALLS
 # ==============================================================================
 st.subheader("🚀 2. SIMULAÇÃO I: Options Calls para Lançamento Inicial")
 qtd_lanc = st.radio("Quantidade de opções a avaliar para Lançamento Inicial:", [1, 2, 3], horizontal=True, key="qtd_lanc")
 
 # ==============================================================================
-# 3. SIMULAÇÃO II: FLAG E ENTRADA PARA ROLAGEM DA OPÇÃO
+# 3. SIMULAÇÃO II: ROLAGEM DA OPÇÃO
 # ==============================================================================
 st.divider()
 st.subheader("🔄 3. SIMULAÇÃO II: Corrida de Rolagem da Opção")
@@ -161,7 +163,7 @@ st.subheader("🔄 3. SIMULAÇÃO II: Corrida de Rolagem da Opção")
 executar_rolagem = st.checkbox("Ativar corrida de simulação para Rolagem da Opção", value=False)
 
 if executar_rolagem:
-    st.warning("⚠️ **Regra de Rolagem Ativa:** Na Simulação I, insira **apenas 1 opção** (representando a opção já lançada na sua carteira). Na Simulação II abaixo, insira as opções candidatas para a rolagem.")
+    st.warning("⚠️ **Regra de Rolagem Ativa:** Na Simulação I, insira **apenas 1 opção** (representando a opção vendida atualmente). Na Simulação II, insira as opções candidatas para a nova rolagem.")
     opcoes_lancamento = capturar_entradas_opcoes_call("lanc", 1, modo_rolagem=True)
     
     qtd_rol = st.radio("Quantidade de opções a avaliar para Rolagem:", [1, 2, 3], horizontal=True, key="qtd_rol")
@@ -181,9 +183,6 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
     
     vrp_geral = vol_implicita - vol_historica
     
-    # --------------------------------------------------------------------------
-    # MODALIDADE 1: APENAS SIMULAÇÃO I (LANÇAMENTO INICIAL)
-    # --------------------------------------------------------------------------
     if not executar_rolagem:
         st.markdown("### 📋 Análise Comparativa: Lançamento Inicial de Calls")
         
@@ -232,21 +231,29 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
         diff_edge = melhor_lanc['preco'] - melhor_lanc['preco_teorico']
         taxa_op = (melhor_lanc['preco'] / preco_acao) * 100.0
         
-        st.markdown("### 💡 Racional Técnico e Fundamentação Teórica:")
-        st.write(f"• **Sheldon Natenberg (Volatilidade & VRP):** O IV Rank da ação está em `{iv_rank:.2f}%` e o *Variance Risk Premium* (IV - HV) está positivo em `{vrp_geral:+.2f}%`. O cenário valida a venda de volatilidade inflacionada.")
-        st.write(f"• **Euan Sinclair (Edge Estatístico & Preço Teórico):** A opção `{melhor_lanc['ticker']}` entrega um *Edge* de `R$ {diff_edge:+.2f}` frente ao Preço Teórico (`R$ {melhor_lanc['preco_teorico']:.2f}`). Para Sinclair, vender acima do Fair Value é o requisito essencial para expectativa matemática positiva ($E[X] > 0$).")
-        st.write(f"• **Nassim Nicholas Taleb (Estilo & Risco Gamma):** Opção do estilo **{melhor_lanc['estilo']}**. Taleb alerta que Calls Americanas com dividendos iminentes possuem risco de exercício antecipado (*early exercise*) se o valor temporal for inferior ao dividendo. Mantém-se o Gamma sob controle em `{melhor_lanc['gamma']:.4f}`.")
-        st.write(f"• **Yield & Decaimento:** Retorno bruto imediato de `{taxa_op:.2f}%` sobre a ação com captura diária de Theta de `{melhor_lanc['theta_pct']:.3f}%`.")
-        if flag_proventos and data_ex and (data_ex <= melhor_lanc['vencimento']):
-            st.write(f"• **Impacto de Proventos:** A custódia assegura o fluxo de `R$ {provento_liq:.2f}` antes do exercício (Data Ex: {data_ex.strftime('%d/%m/%Y')}).")
+        st.markdown("### 💡 Racional Técnico e Fundamentação Teórica Integrada:")
+        st.write(f"• **Natenberg (Volatilidade & Proventos):** O *Variance Risk Premium* (IV - HV) está em `{vrp_geral:+.2f}%`. Natenberg destaca que o dividendo anunciado reduz o preço spot ex-provento ($S^* = S - PV(D)$), barateando o valor teórico de Calls. A venda de volatilidade se beneficia se o IV Rank (`{iv_rank:.2f}%`) estiver inflacionado por conta do anúncio do provento.")
+        st.write(f"• **Sinclair (Edge & Fair Value Ajustado):** *Edge* estatístico de `R$ {diff_edge:+.2f}`. Sinclair enfatiza que a precificação teórica ($Fair\ Value = R\$ {melhor_lanc['preco_teorico']:.2f}$) deve obrigatoriamente descontar a taxa contínua de dividendos ($q$) para evitar calcular um falso *Edge* ao vender Calls antes da Data Ex.")
+        st.write(f"• **Taleb (Risco de Exercício Antecipado e Gregas):** Opção do estilo **{melhor_lanc['estilo']}**. Taleb alerta que se a opção for Americana e o valor temporal do prêmio ($Extrinsic\ Value$) for inferior ao dividendo líquido de `R$ {provento_liq:.2f}`, o comprador **exercerá a Call na véspera da Data Ex**. Isso colapsa o Vega ($\nu$) e torna o Delta ($\Delta$) equivalente a $1.0$.")
 
-    # --------------------------------------------------------------------------
-    # MODALIDADE 2: SIMULAÇÃO II (ROLAGEM DA OPÇÃO LANCEI X OPÇÕES CANDIDATAS)
-    # --------------------------------------------------------------------------
     else:
         op_atual = opcoes_lancamento[0]
+        dte_atual = op_atual['dte_uteis']
+        estilo_atual = op_atual['estilo']
         
-        st.markdown(f"### 📋 Posição Atual (Opção Lançada): `{op_atual['ticker']}` ({op_atual['estilo']}) | Strike: R$ {op_atual['strike']:.2f} | Preço Mercado Atual: R$ {op_atual['preco']:.2f}")
+        st.markdown(f"### 📋 Posição Atual: `{op_atual['ticker']}` ({estilo_atual}) | Strike: R$ {op_atual['strike']:.2f} | DTE Restante: **{dte_atual} d.u.**")
+        
+        st.markdown("#### 🚨 Diagnóstico de Rolagem, Proventos e Timing")
+        
+        if 7 <= dte_atual <= 10:
+            st.success(f"✅ **PERFEITO TIMING DE ROLAGEM ({dte_atual} d.u. restantes):** Janela ideal de mercado (7-10 d.u.). A captura de Theta já superou 80% e o Gamma começa a atingir níveis críticos.")
+        elif dte_atual > 10:
+            if estilo_atual == "Europeia":
+                st.error(f"❌ **CRÍTICA TÉCNICA - ROLAGEM PREMATURA (Opção Europeia):** Como a opção é **Europeia**, não há risco de exercício antecipado na Data Ex-Provento. Rolar a {dte_atual} d.u. interrompe a aceleração do Theta ($\Theta$) descrita por Natenberg e introduz custos desnecessários de spread.")
+            else:
+                st.warning(f"⚠️ **ROLAGEM ANTECIPADA (Opção Americana):** Avalie o valor temporal restante. Se $Extrinsic\ Value < Dividendo\ Líquido$ (`R$ {provento_liq:.2f}`), a rolagem antecipada se justifica para evitar o exercício involuntário na Data Ex.")
+
+        st.markdown("---")
         st.markdown("### 📋 Análise Comparativa para Rolagem da Opção")
         
         dados_tab_rol = []
@@ -293,13 +300,10 @@ if st.button("Qual é a melhor call para venda coberta?", type="primary", use_co
         st.markdown("---")
         credito_final = melhor_rol['preco'] - op_atual['preco']
         
-        if credito_final >= 0:
-            st.success(f"🔄 **RECOMENDAÇÃO DE ROLAGEM A CRÉDITO:** Rolar `{op_atual['ticker']}` ➔ `{melhor_rol['ticker']}` ({melhor_rol['estilo']} | Strike: R$ {melhor_rol['strike']:.2f} | Crédito Líquido: **R$ {credito_final:+.2f}**)")
-        else:
-            st.warning(f"⚠️ **ATENÇÃO PARA ROLAGEM:** A opção `{melhor_rol['ticker']}` é a melhor opção entre as avaliadas, porém resulta em Débito Líquido de **R$ {credito_final:+.2f}**.")
+        st.success(f"🔄 **RECOMENDAÇÃO DE ROLAGEM:** Rolar `{op_atual['ticker']}` ➔ `{melhor_rol['ticker']}` ({melhor_rol['estilo']} | Strike: R$ {melhor_rol['strike']:.2f} | Resultado Líquido: **R$ {credito_final:+.2f}**)")
             
-        st.markdown("### 💡 Racional Técnico e Fundamentação Teórica da Rolagem:")
-        st.write(f"• **Regra do Mercado (Roll for Credit):** Operação gerando `R$ {credito_final:+.2f}` por contrato. Evita-se rolar a débito para não consumir o *yield* base.")
-        st.write(f"• **Nassim Nicholas Taleb (Atenuação do Risco Gamma & Exercício):** A substituição reduz o Gamma de `{op_atual['gamma']:.4f}` para `{melhor_rol['gamma']:.4f}` ao estender o prazo para `{melhor_rol['dte_uteis']} d.u.`. Como a nova Call é **{melhor_rol['estilo']}**, o risco de exercício antecipado deve ser monitorado se houver proventos superiores ao prêmio remanescente.")
-        st.write(f"• **Sheldon Natenberg & Euan Sinclair (Edge em Novo Vencimento):** Explora a volatilidade inflacionada (IV Rank `{iv_rank:.2f}%`) capturando *Edge* de `R$ {melhor_rol['preco'] - melhor_rol['preco_teorico']:+.2f}` frente ao Preço Teórico.")
-        
+        st.markdown("### 💡 Racional Técnico da Literatura sobre Proventos e Rolagem:")
+        st.write(f"• **Natenberg & Proventos:** A rolagem estende o vencimento para `{melhor_rol['dte_uteis']} d.u.`. Se a nova opção cobrir a Data Ex ({data_ex.strftime('%d/%m/%Y') if data_ex else 'N/A'}), o preço de exercício é indiretamente protegido pela queda ex-dividendo do ativo subjacente.")
+        st.write(f"• **Sinclair & Edge:** A nova estrutura captura um crédito líquido de `R$ {credito_final:+.2f}` e assegura um *Edge* estatístico de `R$ {melhor_rol['preco'] - melhor_rol['preco_teorico']:+.2f}`.")
+        st.write(f"• **Taleb & Risco Gamma/Exercício:** A troca de séries atenua a aceleração de Gamma ($\Gamma$) de `{op_atual['gamma']:.4f}` para `{melhor_rol['gamma']:.4f}`. Caso a opção seja **Europeia**, o investidor elimina 100% do risco de ser exercido na véspera da Data Ex-Provento.")
+                                  
